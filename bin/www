@@ -1,0 +1,712 @@
+#!/usr/bin/env node
+var app = require('../app');
+var debug = require('debug')('gameapp:server');
+var http = require('http');
+//Get port from environment and store in Express.
+var port = normalizePort(process.env.PORT || '3000');
+app.set('port', port);
+//Create HTTP server.
+var server = http.createServer(app);
+//Listen on provided port, on all network interfaces.
+server.listen(port);
+//socket.io
+const io = require('socket.io')(server);
+//to access logged in users
+var UserController = require('../controllers/UserController');
+
+
+
+//GAME STUFF
+var users=UserController.users;
+var rooms = [];
+var roomCounter=1;
+//MOVE TYPE
+const NO_MOVE = 0;
+const MOVE = 1;
+const REPLACED = 2;
+//TILE OCCUPATION
+const EMPTY = 0;
+const BLUE = 1;
+const GREEN = 2;
+const YELLOW = 3;
+const RED = 4;
+
+//startna polja za razlicne barve (zacel sem z 0 ker hocem accesat arrej z vrednostjo barve igralca BLUE = 1... array se zacne z index 0)
+let start = [0,1,11,21,31];
+
+//tabele z prevodi iz pozicije v id za barve in nazaj
+let blue = {
+  "-4":"BB1",
+  "-3":"BB2",
+  "-2":"BB3",
+  "-1":"BB4",
+  "41":"B1",
+  "42":"B2",
+  "43":"B3",
+  "44":"B4"
+} 
+let blueR = {
+  "BB1":"-4",
+  "BB2":"-3",
+  "BB3":"-2",
+  "BB4":"-1",
+  "B1":"41",
+  "B2":"42",
+  "B3":"43",
+  "B4":"44"
+} 
+let green = {
+  "-4":"GB1",
+  "-3":"GB2",
+  "-2":"GB3",
+  "-1":"GB4",
+  "41":"G1",
+  "42":"G2",
+  "43":"G3",
+  "44":"G4"
+}
+let greenR = {
+  "GB1":"-4",
+  "GB2":"-3",
+  "GB3":"-2",
+  "GB4":"-1",
+  "G1":"41",
+  "G2":"42",
+  "G3":"43",
+  "G4":"44"
+} 
+let yellow = {
+  "-4":"YB1",
+  "-3":"YB2",
+  "-2":"YB3",
+  "-1":"YB4",
+  "41":"Y1",
+  "42":"Y2",
+  "43":"Y3",
+  "44":"Y4"
+}
+let yellowR = {
+  "YB1":"-4",
+  "YB2":"-3",
+  "YB3":"-2",
+  "YB4":"-1",
+  "Y1":"41",
+  "Y2":"42",
+  "Y3":"43",
+  "Y4":"44"
+} 
+let red = {
+  "-4":"RB1",
+  "-3":"RB2",
+  "-2":"RB3",
+  "-1":"RB4",
+  "41":"R1",
+  "42":"R2",
+  "43":"R3",
+  "44":"R4"
+}
+let redR = {
+  "RB1":"-4",
+  "RB2":"-3",
+  "RB3":"-2",
+  "RB4":"-1",
+  "R1":"41",
+  "R2":"42",
+  "R3":"43",
+  "R4":"44"
+}
+
+//inicializira iralno polje
+function initGameBoard(){
+  let tiles = [];
+  for(let i=1;i<41;i++){
+    let tile={
+      "id":i,
+      "occupied":0
+    };
+    tiles.push(tile);
+  }
+  let boxes = {"1":[{"id":"BB1","occupied":1},{"id":"BB2","occupied":1},{"id":"BB3","occupied":1},{"id":"BB4","occupied":1}],
+               "2":[{"id":"GB1","occupied":2},{"id":"GB2","occupied":2},{"id":"GB3","occupied":2},{"id":"GB4","occupied":2}],
+               "4":[{"id":"RB1","occupied":4},{"id":"RB2","occupied":4},{"id":"RB3","occupied":4},{"id":"RB4","occupied":4}],
+               "3":[{"id":"YB1","occupied":3},{"id":"YB2","occupied":3},{"id":"YB3","occupied":3},{"id":"YB4","occupied":3}]};
+
+  let homes = {"1":[{"id":"B1","occupied":0},{"id":"B2","occupied":0},{"id":"B3","occupied":0},{"id":"B4","occupied":0}],
+               "2":[{"id":"G1","occupied":0},{"id":"G2","occupied":0},{"id":"G3","occupied":0},{"id":"G4","occupied":0}],
+               "4":[{"id":"R1","occupied":0},{"id":"R2","occupied":0},{"id":"R3","occupied":0},{"id":"R4","occupied":0}],
+               "3":[{"id":"Y1","occupied":0},{"id":"Y2","occupied":0},{"id":"Y3","occupied":0},{"id":"Y4","occupied":0}]};
+  let gb={
+    "homes":homes,
+    "boxes":boxes,
+    "tiles":tiles
+  }
+  return gb;
+}
+
+//poisce sobo po stevilki
+function findRoom(num){
+  return rooms.find(function(el){return el.num==num;});
+}
+
+//poisce prazno mesto v boxu za kickback
+function findEmptyBox(box){
+  let tile = box.find(function(tile){return tile.occupied==0;});
+  return tile;
+}
+
+//odstrani token iz polja
+function removeToken(tiles, id){
+  let tile = tiles.find(function(tile){return tile.id == id;});
+  tile.occupied=EMPTY;
+}
+
+//doda token na plje, premakne prejsnega v box po potrebi
+function addToken(boxes, tiles, id, color){
+  let tile = tiles.find(function(tile){return tile.id == id;});
+  let oldcolor = 0;
+  //ce je zasedeno
+  if(tile.occupied != 0){
+    //mesto v boxu
+    let boxTile = findEmptyBox(boxes[tile.occupied]);
+    oldcolor = tile.occupied;
+    //premik nazaj v box
+    addToken(boxes, boxes[tile.occupied], boxTile.id, tile.occupied);
+    //premik na polje
+    tile.occupied=color;
+    return {replaced:true, color:oldcolor, replacedId:boxTile.id};
+  }else{
+    tile.occupied=color;
+    return {replaced:false};
+  }
+}
+
+//posodobi pozicijo za igralca po premiku
+function updatePlayerTokens(player, newpos, pos){
+  let token = player.tokens.find(function(token){return token.pos == pos});
+  token.pos = newpos;
+}
+
+//transformira pozicijo igralca v id na igralnem polju
+//vsak igralec ima pozicijo od -4 -> 44, igralno polje ima 40 skupnih tilov 4*4 hise in 4*4 boxe, ki pa so za vsakega igralca posebaj
+function posToId(pos, color){
+  let id;
+  if(color == BLUE){
+    if( pos < 0 || pos > 40){
+      id=blue[pos];
+    }else{
+      id=pos;
+    }
+  }
+  if(color==GREEN){
+    if(pos<0 || pos > 40){
+      id=green[pos];
+    }else{
+      if(pos<31){
+        id= pos+10;
+      }else{
+        id = pos-30;
+      }
+    }
+  }else if(color==YELLOW){
+    if(pos<0 || pos > 40){
+      id=yellow[pos];
+    }else{
+      if(pos<21){
+        id= pos+20;
+      }else{
+        id = pos-20;
+      }
+    }
+  }else if(color==RED){
+    if(pos<0 || pos > 40){
+      id=red[pos];
+    }else{
+      if(pos<11){
+        id= pos+30;
+      }else{
+        id = pos-10;
+      }
+    }
+  }
+  return id;
+}
+
+//transformira id na igralnem polju v posicijo za igralca glede na barvo
+function idToPos(id , color){
+  let pos;
+  if(color == BLUE){
+    if(id=="BB1" || id=="BB2" || id=="BB3" || id=="BB4" || id=="B1" || id=="B2" || id=="B3" || id=="B4"){
+      pos = parseInt(blueR[id]);
+    }else{
+      pos=parseInt(id);
+    }
+  }else if(color == GREEN){
+    if(id=="GB1" || id=="GB2" || id=="GB3" || id=="GB4" || id=="G1" || id=="G2" || id=="G3" || id=="G4"){
+      pos = parseInt(greenR[id]);
+    }else{
+      if(parseInt(id)>=11){
+        pos = parseInt(id)-10;
+      }else{
+        pos = parseInt(id)+30;
+      }
+    }
+  }else if(color == YELLOW){
+    if(id=="YB1" || id=="YB2" || id=="YB3" || id=="YB4" || id=="Y1" || id=="Y2" || id=="Y3" || id=="Y4"){
+      pos = parseInt(yellowR[id]);
+    }else{
+      if(parseInt(id)>=21){
+        pos = parseInt(id)-20;
+      }else{
+        pos = parseInt(id)+20;
+      }
+    }
+  }else if(color == RED){
+    if(id=="RB1" || id=="RB2" || id=="RB3" || id=="RB4" || id=="R1" || id=="R2" || id=="R3" || id=="R4"){
+      pos = parseInt(redR[id]);
+    }else{
+      if(parseInt(id)>=31){
+        pos = parseInt(id)-30;
+      }else{
+        pos = parseInt(id)+10;
+      }
+    }
+  }
+  return pos;
+}
+
+//preveri ce so vsi tokeni v hisi
+function checkIfHomeFull(tokens){
+  let counter=0;
+  tokens.forEach(function(token){
+    if(token.pos>40){
+      counter++;
+    }
+  });
+  if(counter==4){
+    return true;
+  }else{
+    return false;
+  }
+}
+
+//premik tokena
+function moveToken(gb, id, player){
+  let val = player.lastThrow;
+  let color = player.color;
+  //trenutna posicija
+  let pos = idToPos(id, color);
+  //novi id
+  let newid;
+  //podatki o tokenu ki je bil vun vrzen - ce je bilo polje ze zasedeno
+  let replacedData;
+  //je v boxu
+  if(pos < 0){
+    removeToken(gb.boxes[color], id);
+    newid=start[color]; //zacetno polje po barvi
+    replacedData = addToken(gb.boxes, gb.tiles, newid, color);
+  //je v hisi
+  }else if(pos > 40){
+    removeToken(gb.homes[color], id);
+    let newpos = pos+val;
+    newid=posToId(newpos, color);
+    replacedData = addToken(gb.boxes, gb.homes[color], newid, color);
+  //premik po igralnem polju
+  }else if((pos+val) <= 40){
+    removeToken(gb.tiles, id);
+    newid = posToId(pos+val, color);
+    replacedData = addToken(gb.boxes, gb.tiles, newid, color);
+  //premik iz igralnega polja v hiso
+  }else if(pos<= 40){
+    removeToken(gb.tiles, id);
+    let newpos = pos+val;
+    newid = posToId(newpos, color);
+    replacedData = addToken(gb.boxes, gb.homes[color], newid, color);
+  //premik v hisi v hiso
+  }else{
+    removeToken(gb.homes[color], id);
+    let newpos = pos+val;
+    newid = posToId(newpos, color);
+    replacedData = addToken(gb.boxes, gb.homes[color], newid, color);
+  }
+  return {newid:newid, replaced:replacedData.replaced, color: replacedData.color, replacedId:replacedData.replacedId};
+}
+
+//poisce igralca v sobi po idju
+function findPlayer(room, pid){
+  return room.players.find(function(el){return el._id==pid;});
+}
+
+//poisce igralca v sobi po barvi
+function findPlayerC(room, color){
+  return room.players.find(function(el){return el.color==color;});
+}
+
+function allThrown(game){
+  let counter=0;
+  game.players.forEach(element => {
+    if(element.firstThrow!=0){
+      counter++;
+    }
+  });
+  if(counter == 4){
+    return true;
+  }else{
+    return false;
+  }
+}
+
+//inicializira igralca
+function initPlayer(user, num, playerNum){
+  return player={
+    nickname:user.nickname,
+    _id:user._id,
+    num:num,
+    pos:0,
+    color:playerNum,
+    lastThrow:0,
+    firstThrow:0,
+    tokens:[{pos:-4},{pos:-3},{pos:-2},{pos:-1}]
+  };
+}
+
+//poisce najvisji prvi met pri dolocanju vrstnega reda igrlacev, ce vrzejo isto ima prio tisti ki se je pridruzo prej => blue green yellow red
+function highestFirstThrow(players){
+  let highest=0;
+  let highestPlayer;
+  players.forEach(function(player){
+    if(player.firstThrow > highest){
+      highest=player.firstThrow;
+      highestPlayer=player;
+    }
+  });
+  return highestPlayer;
+}
+
+//finds all tokens that are movable for player
+function getMovableTokensPos(gb, tokens, val, color){
+  let movable = [];
+  tokens.forEach(function(token){
+    let targetPos=token.pos+val;  //pricakovano polje premika, cje je nad 44 je prevec vrgo pa gre cez mejo 
+    //is in box(-4-3-2-1) movable only if you throw 6
+    if(token.pos < 0){
+      if(val == 6){
+        let targetId = start[color];  //different starting point for different colors
+        let targetTile = gb.tiles.find(function(tile){return tile.id == targetId});
+        //svojega nemores vun vrect - ce mas na startu figuro nemores se z eno vun prit
+        if(targetTile.occupied != color){
+          movable.push(token);
+        }
+      }
+    //token je na igralnem polju in tarča je na igralnem polju
+    }else if(targetPos <= 40){
+      let targetId = posToId(targetPos, color);
+      let targetTile = gb.tiles.find(function(tile){return tile.id == targetId});
+      //svojega nemores vun vrect
+      if(targetTile.occupied != color){
+        movable.push(token);
+      }
+    //token gre v house
+    }else if(targetPos <= 44){
+      let targetId = posToId(targetPos, color);
+      let targetTile = gb.homes[color].find(function(tile){return tile.id == targetId});
+      //svojega nemores vun vrect
+      if(targetTile.occupied != color){
+        movable.push(token);
+      }
+    }
+  });
+  return movable;
+}
+
+//remove player from room
+function removePlayer(room, player){
+  const index = room.players.indexOf(player);
+  if (index > -1) {
+    room.players.splice(index, 1);
+  }
+  //remove empty room
+  if(room.players.length < 1){
+    const index = rooms.indexOf(room);
+    if (index > -1) {
+      rooms.splice(index, 1);
+    }
+  }
+}
+
+//translate positions to ids
+function getMovableIds(tokens, color){
+  let ids = [];
+  tokens.forEach(function(token){
+    ids.push({
+      id:posToId(token.pos, color),
+    });
+  });
+  return ids;
+}
+
+//return next player
+function nextPlayer(room, player){
+  let index = room.players.indexOf(player);
+  if(index == room.players.length-1){
+    return room.players[0];
+  }else{
+    return room.players[index+1];
+  }
+}
+
+io.on('connection',  (socket) => {
+  //connected to socket
+  console.log("Connected succesfully to the socket ...");
+  socket.emit('Hello', 'Hello world!');
+  //send room state to newly logged in
+  socket.emit("rooms", rooms);
+
+  //RECIEVE
+  //hello
+  socket.on('Hello', function (data) {
+    console.log(data);
+  });
+
+  //createRoom
+  socket.on('createRoom', function(data){
+    let userdata = users.find(function(userdata){return userdata.user._id==data.user_id});
+    if(userdata.user){
+      //userdata, roomnum, color -> first blue = 1
+      let player = initPlayer(userdata.user, "RR"+roomCounter, 1);
+      let room = {
+        num:"RR"+roomCounter,
+        players:[player],
+        gameBoard:initGameBoard(),
+        playerTurn:"",
+        finished:0,
+        inProgress:false
+      }
+      rooms.push(room);
+      roomCounter++;
+
+      socket.emit("joinedRoom", room);
+      socket.broadcast.emit("createdRoom", {"nickname":player.nickname, "num":room.num});
+      io.emit("rooms", rooms);
+    }else{
+      socket.emit("error", {message:"Failed to find userdata plz log in."});
+    }
+  });
+
+  //joinRoom
+  socket.on('joinRoom', function(data){
+    let userdata = users.find(function(userdata){return userdata.user._id==data.user_id});
+    if(userdata.user){
+      let room = findRoom(data.num);
+      if(room){
+        //userdata, roomnum, color
+        let player = initPlayer(userdata.user, room.num, (room.players.length+1));
+        if(room.players.length<4 && !room.inProgress){
+          room.players.push(player);
+          socket.emit("joinedRoom", room);
+          socket.broadcast.emit("userJoinedRoom",{"nickname":player.nickname, "num":room.num}); 
+          io.emit("rooms", rooms);
+          if(room.players.length==4){
+            room.inProgress = true;
+            io.emit("gameStart", room);
+          }
+        }else{
+          socket.emit("joinedRoom", "");
+        }
+      }else{
+        socket.emit("error", {message:"Room doesn't exist."});
+      }
+    }else{
+      socket.emit("error", {message:"Failed to find userdata plz log in."});
+    }
+  });
+
+  //leaveRoom
+  socket.on('leaveRoom', function(data){
+    let room = findRoom(data.num);
+    if(room){
+      let player = findPlayer(room, data.user_id);
+      if(player){
+        //ce je game in progess in si na vrsti ko zapustis
+        if(room.playerTurn == player._id){
+          room.playerTurn = nextPlayer(room, player);
+          io.emit('gameStateChanged',room);
+        }
+        removePlayer(room, player);
+        socket.emit("leftRoom", room);
+        socket.broadcast.emit("userLeftRoom",{"nickname":player.nickname, "num":room.num});
+        io.emit("rooms", rooms);
+      }else{
+        socket.emit("error", {message:"You are not in this room."});
+      }
+    }else{
+      socket.emit("error", {message:"Room doesn't exist."});
+    }
+  });
+
+  //dice roll
+  socket.on('thrown', function(data){
+    let room=findRoom(data.num);
+    if(room){
+      let player=findPlayer(room, data.pid);
+      if(player){
+        player.lastThrow=data.val;
+        io.emit('playerThrew',{"num":room.num, "nickname":player.nickname, "val":data.val});
+        //prvi met za vrstni red
+        if(player.firstThrow == 0){
+          player.firstThrow=data.val;
+          //preveri ce so vsi ze vrgli
+          if(allThrown(room)){
+            //poisce najviji met, ce isto order blue,green,yellow,red
+            let highest=highestFirstThrow(room.players);
+            //set first player turn
+            room.playerTurn={_id:highest._id, nickname:highest.nickname};
+            //tell who to start
+            io.emit('gameStateChanged',room);
+          }
+        }else{
+          //if your turn - se naj nebi zgodlo - dice disabled
+          if(player._id == room.playerTurn._id){
+            //poisce figure ki jih lahko premaknes
+            let movableTokens = getMovableTokensPos(room.gameBoard, player.tokens, data.val, player.color);
+            //preved v idje na polju
+            let movableIds = getMovableIds(movableTokens, player.color);
+            //pogleda ce lahko naredis premik
+            if(movableTokens.length){
+              socket.emit('choseMove', movableIds);
+            }else{
+              //če nisi vrgo 6 next player
+              if(player.lastThrow != 6){
+                room.playerTurn = nextPlayer(room, player);
+              }
+              io.emit('moveReport',{"num":room.num,"nickname":player.nickname,"color":player.color,"moveType":NO_MOVE, "movedFrom":"", "movedTo":"", "replaced":""});
+              io.emit('gameStateChanged',room);
+            }
+          }else{
+            socket.emit("error", {message:"It's not your turn."});
+          }
+        }
+      }else{
+        socket.emit("error", {message:"You are not in this room."});
+      }
+    }else{
+      socket.emit("error", {message:"Room doesn't exist."});
+    }
+  });
+
+  //izvedi premik
+  socket.on('makeMove', function(data){
+    let room=findRoom(data.num);
+    if(room){
+      let player=findPlayer(room, data._id);
+      if(player){
+        //izvede premik, vrne podatke o figuri ki si jo ven vrgo ce ta obstaja  -  na room gameboardu
+        let replacedData = moveToken(room.gameBoard, data.id, player);
+        //izracuna zacetno pozicijo iz idja za igralca
+        let pos = idToPos(data.id, player.color);
+        //izracuna koncno pozicijo iz idja za igralca
+        let newpos = idToPos(replacedData.newid, player.color);
+        //posodobi igralčeve podatke o pozicijah tokenov/figur
+        updatePlayerTokens(player, newpos, pos);
+        //če nisi token ven vrgo
+        if(!replacedData.replaced){
+          io.emit('moveReport',{"num":room.num, "nickname":player.nickname,"color":player.color, "moveType":MOVE, "movedFrom":data.id, "movedTo":replacedData.newid});
+        }else{
+          //če si koga ven vrgo
+          let playerR=findPlayerC(room, replacedData.color);
+          //izracuna zacetno pozicijo iz idja za igralca ki si ga ven vrgo
+          let posR = idToPos(replacedData.newid, playerR.color);
+          //izracuna končne pozicijo iz idja za igralca ki si ga ven vrgo
+          let replacedPos = idToPos(replacedData.replacedId, playerR.color);
+          //posodobi igralčeve podatke o pozicijah tokenov/figur
+          updatePlayerTokens(playerR, replacedPos, posR);
+          io.emit('moveReport',{"num":room.num, "nickname":player.nickname,"color":player.color, "moveType":REPLACED, "movedFrom":data.id, "movedTo":replacedData.newid, 
+                                "replaced":playerR.nickname, "replacedColor": playerR.color, "replacedTo":replacedData.replacedId});
+        }
+        //preverimo ce je igralec koncal
+        let win = checkIfHomeFull(player.tokens);
+        if(win){
+          room.finished++;
+          //TODO DATABSE STATS
+          io.emit('finished', {"nickname":player.nickname, "place":room.finished, "num":room.num});
+          //vrzemo ga ven iz igre
+          socket.emit("leftRoom", room);
+          //odstranimo ga iz rooma
+          removePlayer(room, player);
+          //posodobimo podatke
+          io.emit("rooms", rooms);
+        }
+        //ce je igralec vrgo 6 ostane njegov turn
+        if(player.lastThrow != 6){
+          room.playerTurn = nextPlayer(room, player);
+        }else{
+          //razen ce je njegov win potem gre na naslednjega
+          if(win){
+            room.playerTurn = nextPlayer(room, player);
+          }
+        }
+        io.emit('gameStateChanged',room);
+      }else{
+        socket.emit("error", {message:"You are not in this room."});
+      }
+    }else{
+      socket.emit("error", {message:"Room doesn't exist."});
+    }
+  });
+
+  //TODO on dissconect, database stats, profil view
+
+});
+
+//END GAME STUFF
+
+server.on('error', onError);
+server.on('listening', onListening);
+
+//Normalize a port into a number, string, or false.
+function normalizePort(val) {
+  var port = parseInt(val, 10);
+  if (isNaN(port)) {
+    // named pipe
+    return val;
+  }
+  if (port >= 0) {
+    // port number
+    return port;
+  }
+  return false;
+}
+
+//Event listener for HTTP server "error" event.
+function onError(error) {
+  if (error.syscall !== 'listen') {
+    throw error;
+  }
+  var bind = typeof port === 'string'
+    ? 'Pipe ' + port
+    : 'Port ' + port;
+
+  // handle specific listen errors with friendly messages
+  switch (error.code) {
+    case 'EACCES':
+      console.error(bind + ' requires elevated privileges');
+      process.exit(1);
+      break;
+    case 'EADDRINUSE':
+      console.error(bind + ' is already in use');
+      process.exit(1);
+      break;
+    default:
+      throw error;
+  }
+}
+
+// Event listener for HTTP server "listening" event.
+function onListening() {
+  var addr = server.address();
+  var bind = typeof addr === 'string'
+    ? 'pipe ' + addr
+    : 'port ' + addr.port;
+  debug('Listening on ' + bind);
+}
+
+module.exports = io;

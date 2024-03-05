@@ -1,0 +1,32 @@
+<%- include("layoutT.ejs"); %>
+<div class="container">
+    <div class="userIdField" id="<%= user._id %>" hidden></div>
+    <a class="btn btn-success" onclick="createRoom()">Create room</a>
+    <div class="row">
+      <div class="col-4 messageBoard text-center align-text-middle overflow-auto" style="max-width:50%;max-height:10vh;">
+      </div>
+      <div class="col-6 gameMessageBoard text-center align-text-middle overflow-auto" style="max-width:50%;max-height:10vh;">
+      </div>
+      <div class="col-2 dice" onclick="throwDie(this, 6)">&#x2680</div><!-- true die -->
+      <!-- cheat dies  -->
+      <div class="col-2 dice" onclick="throwDie(this, 1)">&#x2680</div>
+      <div class="col-2 dice" onclick="throwDie(this, 2)">&#x2681</div>
+      <div class="col-2 dice" onclick="throwDie(this, 3)">&#x2682</div>
+      <div class="col-2 dice" onclick="throwDie(this, 4)">&#x2683</div>
+      <div class="col-2 dice" onclick="throwDie(this, 5)">&#x2684</div>
+      <div class="col-2 dice" onclick="throwDie(this, 6)">&#x2685</div>
+      <!--cheat dies  -->
+    </div>
+    <div class="row">
+      <div class="col-4 rooms overflow-auto" style="height: 80vh;">
+      </div>
+      <div class="col-8 container gameBoard" style="max-width:50%;">
+      </div>
+  </div>
+</div>
+<audio id="cheers" src="/images/cheers.mp3"></audio>
+<audio id="kick" src="/images/kick.mp3"></audio>
+<audio id="dicesound" src="/images/dice.mp3"></audio>
+<script src="/socket.io/socket.io.js"></script>
+<script type="text/javascript" src="/javascripts/gameScript.js"></script>
+<%- include("layoutB.ejs"); %>

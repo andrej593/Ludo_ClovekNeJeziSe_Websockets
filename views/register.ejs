@@ -1,0 +1,60 @@
+<%- include('layoutT.ejs'); %>
+    <div class="container">
+        <div class="row justify-content-center">
+                            <div class="col-md-8">
+                                <h2>Register</h2>
+                                <div class="card">
+                                    <% if(message){ %>
+                                        <p class="align-items-center"><%= message %></p>
+                                    <% } %>
+                                    <div class="card-header">Register</div>
+                                    <div class="card-body">
+                                        <form class="form-horizontal" method="post" action="/user/">
+                                            <div class="form-group">
+                                                <label for="name" class="cols-sm-2 control-label">Your Username</label>
+                                                <div class="cols-sm-10">
+                                                    <div class="input-group">
+                                                        <span class="input-group-addon"><i class="fa fa-user fa" aria-hidden="true"></i></span>
+                                                        <input type="text" class="form-control" name="username" id="username" placeholder="Enter your Userame" required/>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="name" class="cols-sm-2 control-label">Your Nickname</label>
+                                                <div class="cols-sm-10">
+                                                    <div class="input-group">
+                                                        <span class="input-group-addon"><i class="fa fa-user fa" aria-hidden="true"></i></span>
+                                                        <input type="text" class="form-control" name="nickname" id="nickname" placeholder="Enter your Nickname" required/>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="email" class="cols-sm-2 control-label">Your Email</label>
+                                                <div class="cols-sm-10">
+                                                    <div class="input-group">
+                                                        <span class="input-group-addon"><i class="fa fa-envelope fa" aria-hidden="true"></i></span>
+                                                        <input type="text" class="form-control" name="email" id="email" placeholder="Enter your Email" required/>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="form-group">
+                                                <label for="password" class="cols-sm-2 control-label">Password</label>
+                                                <div class="cols-sm-10">
+                                                    <div class="input-group">
+                                                        <span class="input-group-addon"><i class="fa fa-lock fa-lg" aria-hidden="true"></i></span>
+                                                        <input type="password" class="form-control" name="password" id="password" placeholder="Enter your Password" required/>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="form-group ">
+                                                <button type="submit" class="btn btn-primary btn-lg btn-block login-button">Register</button>
+                                            </div>
+                                        </form>
+                                    </div>
+        
+                                </div>
+                            </div>
+                        </div>
+        </div>
+        <%- include('layoutB.ejs'); %>
